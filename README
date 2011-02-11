@@ -1,5 +1,30 @@
-password_oracle
+Apassword_oracle
 
+Short explanation:
+
+An "oracle" is an external service you can ask questions of.  A
+"password oracle" is one that answers questions about password
+quality.
+
+This password-oracle tracks whether or not a password as been assigned
+"recently" where "recent" is tunable and by default "not within the
+last 65,536 password allocations." 
+
+It uses a novel data-structure called a "deprecating sketch".
+(warning, super raw draft with embarrassing grammatical errors:
+adamdeprince.com/drafts/deprecating_sketch.pdf).  This is a type of
+counting bloom-filter and somewhat similar but different than the
+"counting-sketch" that Schechter, Herley and Mitzenmacher propose in
+http://research.microsoft.com/pubs/132859/popularityISeverything.pdf
+
+What makes these class of "password popularity" checkers so neat is if
+an adversary downloads a copy of the server's database they will not
+be able to extract any useful passwords from it.
+
+Instructions on how to use this server can be found in the docstring
+of password_oracle.py
+
+Long explanation: 
 
 Way back in the "oldendays" of computing password security meant
 /etc/shadow files, salts, and picking passwords that would be hard for
@@ -100,3 +125,4 @@ your service as grown to the point where it has a million users.
 Suppose a new user created 10 accounts in a short span of time and
 tried to assign them all the same albeit never seen before password.
 A counting sketch would allow this.  A deprecating sketch would not.
+ LocalWords:  docstring
