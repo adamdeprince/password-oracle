@@ -104,7 +104,6 @@ Caveats
   When adding passwords this program doesn't care if you are adding
   the same or different passwords; old entries are flushed after
   however many adds are specified in --items.
-
 """
 
 import BaseHTTPServer
@@ -141,42 +140,110 @@ ERR_INTERRUPTED = 4
 
 
 class PasswordOracleRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
+    """PasswordORacleRequestHander
+    
+    An http interface to:
+    
+    * Check membership in the deprecating hash (actually returns
+      !member, true if the password is available for use, false
+      otherwise.)
+
+      GET PREFIX/available.json?password=123456 -> bool
+
+    * Add temporary membership to the deprecating hash
+
+      POST PREFIX/add password=123456
+
+    * Check the entropy of a password against a fixed precompiled
+      language model (more bits is better, for a large web service
+      your usres should have ~15-20 bits minimum)
+
+      GET PREFIX/entropy.json?password=123456 -> float 
+
+    * Get both membership and entropy in one convenience call.  Should
+      be a little faster than calling available and entropy
+      sequentially
+      GET PREFIX/all.json&password=123 -> dict(entropy=float, available=bool)
+
+    Only .json is supported right now.
+    """
 
     def path_prefix(self):
+        """Get the path prefix from GFLAGS.path.  
+        
+        This is basically a dependency injection point for testing.
+        """
         return GFLAGS.path
 
     def get_command(self):
+        "Returns the current command (i.e. all, entropy, etc etc.)"
         scheme, netloc, path,  params, query, fragment = urlparse.urlparse(self.path)
         if utils.prefixed(path, self.path_prefix()):
             return path[len(self.path_prefix()):]
 
     def get_password(self):
-        import StringIO
+        "get_password returns the password for a GET request."
         scheme, netloc, path,  params, query, fragment = urlparse.urlparse(self.path)
         data = cgi.parse_qs(query)
         password = data.get('password')
         if password:
             return password[0]
 
+    def get_post_password(self):
+        "get_post_password returns the password for a POST requiest."
+        form = cgi.FieldStorage(
+            fp=self.rfile, 
+            headers=self.headers,
+            environ={'REQUEST_METHOD':'POST',
+                     'CONTENT_TYPE':self.headers['Content-Type'],
+                     })
+        return form['password'].value
+
     def compute_entropy(self, password):
+        """compute_entropy
+        
+        Returns the entropy in a password, or None if no language
+        model was loaded.
+        """
+        
         if self.server.language_model:
             return self.server.language_model.bits(password)
 
     def compute_available(self, password):
+        """compute_available
+        
+        Compute the "availability" of a password based on its
+        membership in the deprecating sketch.
+        
+        Returns:
+          False if the password was added "recently", True otherwise.
+        """
         return password not in self.server.sketch
 
+    def compute_all(self, password):
+        """compute_all
+        
+        Computes both the entrpy and "availability" of a password
+        
+        Returns: 
+          dict(entropy = float,
+               available = true/false)
+        """
+        return dict(entropy=self.compute_entropy(password),
+                    available=self.compute_available(password))
+
     def do_GET(self):
+        "Handle GET requests"
         password = self.get_password()
         if not password:
             self.send_response(HTTP_NOT_FOUND, 'No password provided')
             return 
 
-        function, format = self.get_command().split('.',2)
+        function, format = self.get_command().split('.', 2)
 
         function = {'entropy':self.compute_entropy,
                     'available':self.compute_available,
-                    'all':lambda x:dict(entropy=self.compute_entropy(x), 
-                                     available=self.compute_available(x))}.get(function)
+                    'all':self.compute_all}.get(function)
 
         format = {'json': json.dumps}.get(format)
         
@@ -193,20 +260,11 @@ class PasswordOracleRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         
         self.wfile.write(format(data))
 
-    def get_post_password(self):
-        form = cgi.FieldStorage(
-            fp=self.rfile, 
-            headers=self.headers,
-            environ={'REQUEST_METHOD':'POST',
-                     'CONTENT_TYPE':self.headers['Content-Type'],
-                     })
-        return form['password'].value
-        
 
     def do_POST(self):
+        "Handle POST requests"
         if self.get_command() != 'add':
             return self.send_response(HTTP_NOT_FOUND, 'Unknown command')
-        
         password = self.get_post_password()
         if not password:
             return self.send_response(HTTP_NOT_FOUND, 'Missing password')
@@ -217,9 +275,25 @@ class PasswordOracleRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
 
 
 class PasswordOracleServer(BaseHTTPServer.HTTPServer):
-
+    """PasswordOracleServer
+    
+    An HTTPServer that preloads a deprecating sketch and optionally a static language model. 
+    
+    The deprecating hash is saved on SIGTERM or Ctrl-C
+    """
+    
     @staticmethod 
     def load(pathname, default_class, open=open):
+        """Load a pickle based configuration file.
+        
+        Args:
+          pathname: The pathname of the file
+          default_class: A class to instantiate if the config file
+            cannot be loaded.
+          open: An optional parameter indicating the function used to
+            open the config file.  Useful for specifying a compressor
+            such as gzip.open
+        """
         if pathname:
             try:
                 return cPickle.load(open(pathname))
@@ -229,16 +303,30 @@ class PasswordOracleServer(BaseHTTPServer.HTTPServer):
 
     @classmethod
     def sketch_factory(cls, sketch_path):
+        """Load the current deprecating sketch."""
         return cls.load(sketch_path, deprecating_sketch.DeprecatingSketch)
     
     @classmethod
     def language_model_factory(cls, language_model_path):
+        """Load the language_model.  Decompress it with gzip."""
         return cls.load(language_model_path, language_model.LanguageModel, open=gzip.open)
 
     def save(self, *_):
+        """Save the current deprecating sketch."""
         cPickle.dump(self.sketch, open(self.sketch_path, "w+"))
 
-    def __init__(self, language_model_path, sketch_path, *args, **kwargs):
+    def __init__(self, sketch_path, language_model_path=None, *args, **kwargs):
+        """Create a new instance of the PasswordOracleServer.
+        
+        Args:
+          sketch_path: Path to the deprecating sketch.  A new sketch
+            will be created on save if none currently exists.
+
+          language_model_path: The path to the language model.
+          Defaults to None in which case calls to "entropy" will
+          return a 503
+        """
+
         BaseHTTPServer.HTTPServer.__init__(self, *args, **kwargs)
         self.sketch = self.sketch_factory(sketch_path)
         self.language_model = self.language_model_factory(language_model_path)
@@ -246,6 +334,11 @@ class PasswordOracleServer(BaseHTTPServer.HTTPServer):
         self.sketch_path = sketch_path
 
     def run_forever(self):
+        """Run this service for ever.
+
+        Catches and saves the deprecating sketch state on
+        KeyboardInterrupt and signal.SIGTERM.
+        """
         import select 
         signal.signal(signal.SIGTERM, self.save)
         try:
@@ -258,7 +351,6 @@ class PasswordOracleServer(BaseHTTPServer.HTTPServer):
                         raise err
         except KeyboardInterrupt:
             self.save()
-
 
 def main(argv):
     try:
