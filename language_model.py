@@ -61,7 +61,7 @@ class DummyHistogram:
         
 class LanguageModel(dict):
     """A n-tuple language model container."""
-    def __init__(self, data={}, default_bits = 6.5):
+    def __init__(self, data={}, default_bits=6.5):
         """Create a new LanguageModel
 
         Args:

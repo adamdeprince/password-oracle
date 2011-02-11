@@ -12,9 +12,7 @@ class PrefixTest(unittest.TestCase):
         self.assertEquals(prefixed("abc", "b"),
                           False)
 
-
 class SegmentationTest(unittest.TestCase):
-
     def test_segment(self):
         expected = [((None, None), "s"),
                     ((None, "s"), "t"),

@@ -2,10 +2,25 @@
 
 
 class Identity:
+    """A mixin class that provides custom hashing and comparison
+
+    Hashing and comparisons are performed on the results of a new method
+    __identity__.   So, instead of writing:
+
+    def __hash__(self):
+      return hash(dosomething(self))
+
+    def __cmp__(self, other):
+      return cmp(dosomething(self), dosomething(other))
+
+    You would simply define:
+
+    def __identity__(self):
+      return dosomething(self)
+    """
+
     def __hash__(self):
         hash(self.__identity__())
-
-
 
     def __cmp__(self, other):
         return cmp(self.__identity__(), other.__identity__())
@@ -35,7 +50,11 @@ def segment(s, n=3):
 
 
 def all_but_the_last(generator):
-    """Yields all but the last item in a sequence.""" 
+    """Yields all but the last item in a sequence.
+
+    This is just like list[generator][:-1] except it doesn't require
+    the entire sequnce be precomputed.
+    """ 
     second_to_last = generator.next()
     while True:
         last = generator.next()
