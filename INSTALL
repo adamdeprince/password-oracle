@@ -1,0 +1,6 @@
+Requirements: 
+  python-gflags 
+
+Installation:
+  No setup.py file yet.  Just run from the source directory for now.   Really. 
+
