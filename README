@@ -1,0 +1,102 @@
+password_oracle
+
+
+Way back in the "oldendays" of computing password security meant
+/etc/shadow files, salts, and picking passwords that would be hard for
+a determined cracker to guess given a small cluster of faster
+computers.
+
+Times have changed.  No longer is your adversary a student picking away
+at the internal security of their school's timeshare Unix machine.
+The new adversary is in the cloud.
+
+Modern online "cloud" services have a number of tools at their
+disposal to prevent automated password guessing attacks on their
+networks.  Captcha, per IP address throttle limits and per account
+throttle limits.
+
+Some sites (like Google) use captcha to block automated password login
+attempts.  In the long run this won't work, computer vision is
+improving at a scary fast pace, human vision slogs along to the whims
+of evolutionary pressure over thousands and millions of years.  Pretty
+soon we'll be scratching our heads and asking our personal AI's to
+tell us what the captcha says.  Scratch that.
+
+IP based throttling doesn't work - there is simply no go way to tell
+if a particular IP is a household on a DSL, a large companies office
+or an entire nation.  IP address exhaustion doesn't help this matter.
+And bad-guys have no qualms using bot-nets to spread their nefarious work
+across lots and lots of IP addresses.
+
+The only thing that works is "user-name" based throttling.  For the
+most part 1990's style password brute forcing can be prevented by
+throttling the rate at which the doorknob to any users account can be
+turned.
+
+Put yourself in the shoes of a cracker.  You have unlimited IP
+addresses.  The only real limit you have is how many passwords you can
+try for one account.  How do you maximize your haul.
+
+Pick common passwords.  In the Rock You password corpus over 1% of all
+users selected "123456" as their password - the most efficient way to
+steal accounts is to just try "123456" on each account and move on if
+it doesn't work ... if facebook is the same that should net you a cool
+half a million or so accounts.  
+
+So, how do you defend against this?  
+
+You could restrict how often passwords are reused.  Twitter disallows
+their 390 most common passwords.  But there are few problems with
+that.  First, it requires you have your passwords stored someplace in
+the clear so you can figure out what your most common passwords are.
+Companies make headlines doing that.
+
+The second problem is users are really predictable in how they modify
+their passwords to address password restrictions.  Guess what number
+50% of all users that put a number in the middle of their passwords
+choose - 4.  And if you look at the text that comes before and after
+the "4" its obvious "4" is a stand-in for "for."  Tell a user "you
+can't use 123456" and they are likely to use "1234567" instead.  Or
+write in "l33tsp3ak."  Simple password restrictions simply shift the
+peak around.  You also don't want ti make password selection too
+difficult; if the user has to think too hard they are likely to go
+away and use another service.  Ideally you want to dynamically measure
+the number of times a password occurs and deny the user when the
+password they are selecting is "too common", but 
+
+So how do we choose between these two evils; living without the
+ability to know which passwords are common and having clear text
+passwords?
+
+Turns out we can have our cake and eat it to with a "bloom-filter." 
+
+A bloom-filter is a probabilistic data structure that tracks
+approximate set membership; it trades off accuracy and the
+possibility it will accidentally claim an item is in a set that it
+isn't in exchange for a dramatically reduced storage space.
+Bloom-filters have a nice sweet spot where they throw away enough
+information that if a bad guy got hold of the filter they would not be
+able to reconstruct the set membership (i.e. the clear-text passwords)
+but at the same time we have a low enough false positive rate that the
+filter is still useful.
+
+A traditional bloom-filter is a write-once structure; once you add
+something you can't take it out.  Its okay if more than one user uses
+the same password, we just don't want any one password to be used too
+often.  This algorithm changes that somewhat, instead of using bits,
+we store integers and maintain a deque that tracks when it is time to
+remove items from the bloom-filter again.
+
+This won't be the first algorithm to approach this problem.  There is
+a fair amount of prior work dating back to the 90's about bloom-filters
+and passwords.  Microsoft research recently published a paper
+proposing a different approach called a counting sketch. 
+
+The difference between the counting sketch and the deprecating sketch
+is how never before used passwords are treated on a long running
+system.  Suppose you have a sketch configured to not allow any
+password to be used for more than one in every thousand accounts, and
+your service as grown to the point where it has a million users.
+Suppose a new user created 10 accounts in a short span of time and
+tried to assign them all the same albeit never seen before password.
+A counting sketch would allow this.  A deprecating sketch would not.
