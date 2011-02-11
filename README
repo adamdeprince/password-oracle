@@ -32,7 +32,7 @@ of password_oracle.py
 
 Long explanation: 
 
-Way back in the "oldendays" of computing password security meant
+Way back in the olden days of computing password security meant
 /etc/shadow files, salts, and picking passwords that would be hard for
 a determined cracker to guess given a small cluster of faster
 computers.
