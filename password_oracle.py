@@ -19,7 +19,7 @@ is long be patient, on a "typical" machine (MacBook Air 1.86ghz) the
 compiler will process about 1/2 million lines per minute Also note
 that repeated words increase the weight of that word.
 
-# grep -v '#' password.lst |  ./language_model.py > language_model.pickle 
+# grep -v '#' password.lst |  ./language_model.py | gzip -9 > language_model.pickle.gz 
 
 2. Start your server.  Note that changing bloom-filter parameters will
 erase your recent password history.  The server will by default store
@@ -107,18 +107,18 @@ Caveats
 
 """
 
-
-import cgi
-import urlparse 
 import BaseHTTPServer
 import cPickle
+import cgi
 import deprecating_sketch
+import gflags 
+import gzip
 import json
 import language_model
 import signal 
-import utils
-import gflags 
 import sys 
+import urlparse 
+import utils
 
 from language_model import LanguageModel, Histogram
 
@@ -130,6 +130,7 @@ gflags.DEFINE_integer('port', 8000, 'Port addr to listen to')
 gflags.DEFINE_string('language_model', None, 'Language model to load')
 gflags.DEFINE_string('bloom_filter', 'bloom_filter.pickle', 'Bloomfilter to load')
 
+
 HTTP_UNAVAILABLE = 503
 HTTP_OK = 200 
 HTTP_CREATED = 201 
@@ -137,6 +138,7 @@ HTTP_NOT_FOUND = 404
 HTTP_BAD_FORMAT = 415 
 
 ERR_INTERRUPTED = 4 
+
 
 class PasswordOracleRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
 
@@ -155,7 +157,6 @@ class PasswordOracleRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         password = data.get('password')
         if password:
             return password[0]
-
 
     def compute_entropy(self, password):
         if self.server.language_model:
@@ -218,7 +219,7 @@ class PasswordOracleRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
 class PasswordOracleServer(BaseHTTPServer.HTTPServer):
 
     @staticmethod 
-    def load(pathname, default_class):
+    def load(pathname, default_class, open=open):
         if pathname:
             try:
                 return cPickle.load(open(pathname))
@@ -232,7 +233,7 @@ class PasswordOracleServer(BaseHTTPServer.HTTPServer):
     
     @classmethod
     def language_model_factory(cls, language_model_path):
-        return cls.load(language_model_path, language_model.LanguageModel)
+        return cls.load(language_model_path, language_model.LanguageModel, open=gzip.open)
 
     def save(self, *_):
         cPickle.dump(self.sketch, open(self.sketch_path, "w+"))
@@ -241,7 +242,7 @@ class PasswordOracleServer(BaseHTTPServer.HTTPServer):
         BaseHTTPServer.HTTPServer.__init__(self, *args, **kwargs)
         self.sketch = self.sketch_factory(sketch_path)
         self.language_model = self.language_model_factory(language_model_path)
-        print len(self.language_model), language_model_path
+
         self.sketch_path = sketch_path
 
     def run_forever(self):
