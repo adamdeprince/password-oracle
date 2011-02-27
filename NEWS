@@ -1,0 +1,57 @@
+Feb 26th, 2011: Added support for the transmission of hash values
+
+The password-oracle was designed to be resistant to database
+inspection attacks by storing approximate records of passwords in a
+bloomfilter, but the original API required you pass clear text
+passwords to the password-oracle.  That's great if you are running
+this only your only server or a private rack with a private intranet on
+a switch off of your own, but it downgrades the security I worked so
+hard to acquire by using a bloomfilter in the first place.
+
+password-oracle now accepts hash values instead of clear text
+passwords.  Here's how it works.
+
+When your application starts up, ask it for the "divisor" you should
+use to generate a hash value.  This number will depend on your bloom
+filter size configuration parameters, and is the number of slots you
+have raised to the number of samples per password.
+
+# curl --get 127.0.0.1:8000/hash_range.json
+ 123456 
+
+
+Because this value is items ** per_item, you should consider setting
+per_item to 1.  This will reduce the accuracy of your bloomfilter
+slight, but make it much less likely that an adversary will be able to
+extract passwords from your communication with the server.
+
+Now to use the server, your application, whether in java script or in
+your app server, will need to somehow generate a hash value, store it
+as a number and mod it by this value.  
+
+So, if in python you might write:
+
+>>> int(hashlib.md5('secret').hexdigest(), 16) % 123456 
+61225 
+
+Use this value as a proxy for your password.  If you use the default
+settings, but set --per-item to 1, this value will be 65536 and
+generally won't be reversible.
+
+Now use the "available" and "add" commands as you did before, except
+with the parameter hash=61225 instead of password=secret
+
+Note that entropy.json won't work because it can't reverse the hash and figure
+out your original password (there are gazillions of good matches).
+all won't work because it calls entropy.
+
+Also keep in mind that unless you are absolutely sure you are using
+the same hash functions password_oracle does, you cannot meaningfully
+mix calls with password and hash; switching, or switching your hash
+algorithm will basically result in gibberish and random behavior
+until your current passwords deprecate.  The system won't be
+unusable, you'll still have the same false positive rate, it just
+won't catch your common passwords the first time they are used, its
+sort of like stating with a fresh bloomfilter except you have a false
+positive rate from the get-go instead of building up gradually as
+items are added.

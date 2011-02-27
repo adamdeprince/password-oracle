@@ -19,6 +19,8 @@ class PasswordOracleRequestHandlerCrashDummy(PasswordOracleRequestHandler):
         self.server = FakeServer(sketch, language_model) 
         self.headers_ended = False 
         self.wfile = StringIO.StringIO()
+        self.test_password = None
+        self.test_hash = None
 
     def path_prefix(self):
         return PREFIX 
@@ -32,6 +34,9 @@ class PasswordOracleRequestHandlerCrashDummy(PasswordOracleRequestHandler):
     def get_post_password(self):
         # Not bothering to test cgi.FieldStorage.  Pretty sure it works. 
         return self.test_password
+
+    def get_post_hash(self):
+        return self.test_hash
 
 
 class PasswordOracleRequestHandlerTest(unittest.TestCase):
@@ -71,25 +76,30 @@ class PasswordOracleRequestHandlerTest(unittest.TestCase):
         actual = json.loads(self.handler.wfile.getvalue())
         self.assertAlmostEqual(actual['entropy'], 2.00)
         self.assertEqual(actual['available'], True)
-        
+
+    def test_get_bits_required(self):
+        self.handler.path = PREFIX + "hash_range.json?password"
+        self.handler.do_GET()
+        actual = json.loads(self.handler.wfile.getvalue())
+        self.assertEqual(actual, 1000)
 
 class PasswordOracleRequestHandlerComplexTest(unittest.TestCase):
-    def test_post_writes_to_sketch(self):
-        sketch = deprecating_sketch.DeprecatingSketch(slots=100, items=2, per_item=1)
+    def setUp(self):
+        self.sketch = deprecating_sketch.DeprecatingSketch(slots=100, items=2, per_item=1)
 
-        handler = PasswordOracleRequestHandlerCrashDummy(
-            sketch, 
+        self.handler = PasswordOracleRequestHandlerCrashDummy(
+            self.sketch, 
             language_model.compile(StringIO.StringIO("aaa\naab\nabb\naaa")))
+        
+    def test_post_writes_to_sketch(self):
+        sketch = self.sketch
+        handler = self.handler 
 
         handler.path = PREFIX + "available.json?password=secret"
         handler.data = dict(password="secret")
         handler.do_GET()
         self.assertEquals(handler.response_code[0], 200)
         self.assertTrue(json.loads(handler.wfile.getvalue()))
-
-        handler = PasswordOracleRequestHandlerCrashDummy(
-            sketch, 
-            language_model.compile(StringIO.StringIO("aaa\naab\nabb\naaa")))
 
         handler.path = PREFIX + "add"
         handler.test_password='secret'
@@ -104,7 +114,29 @@ class PasswordOracleRequestHandlerComplexTest(unittest.TestCase):
         handler.do_GET()
         self.assertFalse(json.loads(handler.wfile.getvalue()))
 
-        
+    def test_hashmode_writes_to_sketch(self):
+        sketch = self.sketch
+        handler = self.handler 
+
+        handler.path = PREFIX + "available.json?hash=1"
+        handler.data = dict(hash="1")
+        self.assertEquals(self.handler.get_hash(), 1 )
+        handler.do_GET()
+        self.assertEquals(handler.response_code[0], 200)
+        self.assertTrue(json.loads(handler.wfile.getvalue()))
+
+        handler.path = PREFIX + "add" 
+        handler.test_hash = 1 
+        handler.do_POST()
+        self.assertEquals(handler.response_code[0], 201)
+
+        handler = PasswordOracleRequestHandlerCrashDummy(
+            sketch, 
+            language_model.compile(StringIO.StringIO("aaa\naab\nabb\naaa")))
+
+        handler.path = PREFIX + "available.json?hash=1"
+        handler.do_GET()
+        self.assertFalse(json.loads(handler.wfile.getvalue()))
 
 if __name__ == "__main__":
     unittest.main()

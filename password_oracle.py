@@ -19,11 +19,13 @@ is long be patient, on a "typical" machine (MacBook Air 1.86ghz) the
 compiler will process about 1/2 million lines per minute Also note
 that repeated words increase the weight of that word.
 
-# grep -v '#' password.lst |  ./language_model.py | gzip -9 > language_model.pickle.gz 
+# grep -v '#' password.lst |  ./language_model.py | \
+  gzip -9 > language_model.pickle.gz 
 
 2. Start your server.  Note that changing bloom-filter parameters will
 erase your recent password history.  The server will by default store
-its history data in "bloom_filter.pickle", but by default no language model is loaded.
+its history data in "bloom_filter.pickle", but by default no language
+model is loaded.
 
 BTW, by default the bloom-filter tables are setup for a 65,536 element
 history.  This means that no password can occur more than 1 out of
@@ -139,6 +141,12 @@ HTTP_BAD_FORMAT = 415
 ERR_INTERRUPTED = 4 
 
 
+class PasswordRequired:
+    "Raised to note that a particular handler requires a password"
+
+class BadPrefix:
+    "Raised if the URI prefix isn't correct (wrong branch.)"
+
 class PasswordOracleRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     """PasswordORacleRequestHander
     
@@ -149,10 +157,12 @@ class PasswordOracleRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
       otherwise.)
 
       GET PREFIX/available.json?password=123456 -> bool
+      GET PREFIX/available.json?hash=37 -> bool
 
     * Add temporary membership to the deprecating hash
 
       POST PREFIX/add password=123456
+      POST PREFIX/add hash=36
 
     * Check the entropy of a password against a fixed precompiled
       language model (more bits is better, for a large web service
@@ -164,6 +174,9 @@ class PasswordOracleRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
       be a little faster than calling available and entropy
       sequentially
       GET PREFIX/all.json&password=123 -> dict(entropy=float, available=bool)
+
+    * Find this database's required divisor for hash values
+      GET PREFIX/get_hash.json -> 65536 
 
     Only .json is supported right now.
     """
@@ -180,6 +193,7 @@ class PasswordOracleRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         scheme, netloc, path,  params, query, fragment = urlparse.urlparse(self.path)
         if utils.prefixed(path, self.path_prefix()):
             return path[len(self.path_prefix()):]
+        raise BadPrefix()
 
     def get_password(self):
         "get_password returns the password for a GET request."
@@ -188,6 +202,14 @@ class PasswordOracleRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         password = data.get('password')
         if password:
             return password[0]
+
+    def get_hash(self):
+        "get_password returns the hash for a GET request."
+        scheme, netloc, path,  params, query, fragment = urlparse.urlparse(self.path)
+        data = cgi.parse_qs(query)
+        hash = data.get('hash')
+        if hash:
+            return int(hash[0])
 
     def get_post_password(self):
         "get_post_password returns the password for a POST requiest."
@@ -199,17 +221,19 @@ class PasswordOracleRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                      })
         return form['password'].value
 
-    def compute_entropy(self, password):
+    def compute_entropy(self):
         """compute_entropy
         
         Returns the entropy in a password, or None if no language
         model was loaded.
         """
-        
-        if self.server.language_model:
-            return self.server.language_model.bits(password)
+        if not self.get_password():
+            raise PasswordRequired()
 
-    def compute_available(self, password):
+        if self.server.language_model:
+            return self.server.language_model.bits(self.get_password())
+
+    def compute_available(self):
         """compute_available
         
         Compute the "availability" of a password based on its
@@ -218,9 +242,12 @@ class PasswordOracleRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         Returns:
           False if the password was added "recently", True otherwise.
         """
+        password = self.get_password() or self.get_hash()
+        if not password:
+            raise PasswordRequired()
         return password not in self.server.sketch
 
-    def compute_all(self, password):
+    def compute_all(self):
         """compute_all
         
         Computes both the entrpy and "availability" of a password
@@ -229,20 +256,28 @@ class PasswordOracleRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
           dict(entropy = float,
                available = true/false)
         """
-        return dict(entropy=self.compute_entropy(password),
-                    available=self.compute_available(password))
+        return dict(entropy=self.compute_entropy(),
+                    available=self.compute_available())
+
+    def compute_hash_range(self):
+        return self.server.sketch.hash_range
+
+    def password_required(self, password):
+        "Raises PasswordRequired if not password"
+        if self.get_password() or self.get_hash():
+            return
+        raise PasswordRequired()
 
     def do_GET(self):
         "Handle GET requests"
-        password = self.get_password()
-        if not password:
-            self.send_response(HTTP_NOT_FOUND, 'No password provided')
-            return 
-
-        function, format = self.get_command().split('.', 2)
-
+        try:
+            function, format = self.get_command().split('.', 2)
+        except BadPrefix:
+            return self.send_response(HTTP_NOT_FOUND, 'Wrong prefix')
+        
         function = {'entropy':self.compute_entropy,
                     'available':self.compute_available,
+                    'hash_range':self.compute_hash_range,
                     'all':self.compute_all}.get(function)
 
         format = {'json': json.dumps}.get(format)
@@ -251,8 +286,12 @@ class PasswordOracleRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             return self.send_response(HTTP_NOT_FOUND, 'Unknown function')
         if not format:
             return self.send_response(HTTP_BAD_FORMAT, 'Unknown format')
-        
-        data = function(password)
+        try:
+            data = function()
+        except PasswordRequired:
+            self.send_response(HTTP_NOT_FOUND, 'No password provided')
+            return 
+
         if data is None:
             return self.send_response(HTTP_UNAVAILABLE)
         self.send_response(HTTP_OK)
@@ -263,16 +302,20 @@ class PasswordOracleRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
 
     def do_POST(self):
         "Handle POST requests"
-        if self.get_command() != 'add':
-            return self.send_response(HTTP_NOT_FOUND, 'Unknown command')
-        password = self.get_post_password()
-        if not password:
-            return self.send_response(HTTP_NOT_FOUND, 'Missing password')
-        
-        self.send_response(HTTP_CREATED)
-        self.end_headers()
-        self.server.sketch.add(password)
+        try:
+            if self.get_command() != 'add':
+                return self.send_response(HTTP_NOT_FOUND, 'Unknown command')
+            password = self.get_post_password()
+            hash = self.get_post_hash()
+            if not (password or hash):
+                return self.send_response(HTTP_NOT_FOUND, 'Missing password')
 
+            self.send_response(HTTP_CREATED)
+            self.end_headers()
+            self.server.sketch.add(password or hash)
+        except BadPrefix:
+            return self.send_response(HTTP_NOT_FOUND, 'Bad Prefix')
+        
 
 class PasswordOracleServer(BaseHTTPServer.HTTPServer):
     """PasswordOracleServer

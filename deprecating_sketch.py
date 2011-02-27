@@ -72,7 +72,8 @@ class DeprecatingSketch(utils.Identity):
     def choose_hash_function(self):
         """Assign to self.hashfunc a hashlib function that provides enough bits."""
         required_bits = math.log(len(self.__slots), 2 ) * self.__per_item
-        
+        self.hash_range = len(self.__slots) ** self.__per_item
+
         # TODO(deprince): This is a huge potential perforamnce
         # problem.  Bloomfilters don't need cryptographic quality hash
         # functions?  Might FNV, even implemented in Python, be
@@ -105,7 +106,11 @@ class DeprecatingSketch(utils.Identity):
         Returns:
           An array per_item (see constructor) in length with hash values in Z_slots.
         """
-        h = int(self.hashfunc(s).hexdigest(), 16)
+        try:
+            s + 1 
+            h = s
+        except TypeError:
+            h = int(self.hashfunc(s).hexdigest(), 16)
         for x in range(self.__per_item):
             yield h % len(self.__slots)
             h = h // len(self.__slots)
