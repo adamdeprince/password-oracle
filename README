@@ -1,4 +1,4 @@
-Apassword_oracle
+A password_oracle
 
 Short explanation:
 
@@ -15,8 +15,8 @@ type of counting bloom-filter and somewhat similar but different than
 the "counting-sketch" that Schechter, Herley and Mitzenmacher propose
 in http://research.microsoft.com/pubs/132859/popularityISeverything.pdf
 
-This algorithum differed from Schechter et al in how the counters are
-used.  Their sketch tracks total membership and occationally increases
+This algorithm differed from Schechter et al in how the counters are
+used.  Their sketch tracks total membership and occasionally increases
 a global threshold.  Mine maintains a ring buffer that tracks old
 assignments and decrements counters when the password expires from the
 ring buffer.  Schechter et al allows "credit" to be built up so a
